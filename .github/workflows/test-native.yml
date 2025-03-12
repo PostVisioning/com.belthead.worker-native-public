@@ -1,0 +1,134 @@
+name: Test - native
+on:
+  workflow_dispatch:
+    inputs:
+      project_ref:
+        type: string
+        default: dev
+      spring_profiles_active:
+        type: string
+        default: local-native
+      arch_type:
+        type: string
+        default: x64
+      arch_runner_label:
+        type: string
+        default: ubuntu-22.04
+  workflow_call:
+    inputs:
+      project_ref:
+        type: string
+        default: dev
+      spring_profiles_active:
+        type: string
+        default: local-native
+      arch_type:
+        type: string
+        default: x64
+      arch_runner_label:
+        type: string
+        default: ubuntu-22.04
+
+env:
+  SHELL: bash
+  PROJECT_DIR: com.belthead.worker
+  RUN_SCOPE_CACHE_PREFIX: run-id--${{ github.run_id }}-
+
+jobs:
+  test-integration:
+    runs-on: ${{ inputs.arch_runner_label }}
+    steps:
+      ## CHECKOUT ##
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: 'PostVisioning/com.belthead.worker'
+          ref: ${{ inputs.project_ref }}
+          path: ${{ env.PROJECT_DIR }}
+          token: ${{ secrets.BELTHEAD_REPO_CHECKOUT_TOKEN }}
+      - uses: ./com.belthead.worker/.github/actions/checkout-subproject
+        with:
+          checkout_token: ${{ secrets.BELTHEAD_REPO_CHECKOUT_TOKEN }}
+          working-directory: ${{ env.PROJECT_DIR }}
+
+      ## TOOL ##
+      - uses: ./com.belthead.worker/.github/actions/setup-tool
+        with:
+          jdk_distribution: 'graalvm'
+
+      - name: Binary path
+        id: binary-path
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          echo "cli_path=$(task build:nativeCompile:cli:path)" >> $GITHUB_OUTPUT
+          echo "daemon_path=$(task build:nativeCompile:daemon:path)" >> $GITHUB_OUTPUT
+
+      - name: Import binary - cli
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.PROJECT_DIR }}/${{ steps.binary-path.outputs.cli_path }}
+          key: ${{ env.RUN_SCOPE_CACHE_PREFIX }}-binary-cli-${{ inputs.arch_type }}-${{ inputs.spring_profiles_active }}
+          fail-on-cache-miss: true
+
+      - name: Import binary - daemon
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.PROJECT_DIR }}/${{ steps.binary-path.outputs.daemon_path }}
+          key: ${{ env.RUN_SCOPE_CACHE_PREFIX }}-binary-daemon-${{ inputs.arch_type }}-${{ inputs.spring_profiles_active }}
+          fail-on-cache-miss: true
+
+      - name: Give execution permission to native-image
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          chmod +x ${{ steps.binary-path.outputs.cli_path }}
+          ls -lh ${{ steps.binary-path.outputs.cli_path }}
+          chmod +x ${{ steps.binary-path.outputs.daemon_path }}
+          ls -lh ${{ steps.binary-path.outputs.daemon_path }}
+
+      ## Service containers - belthead-api
+      - uses: ./com.belthead.worker/.github/actions/up-belthead.api-server
+        with:
+          checkout_token: ${{ secrets.BELTHEAD_REPO_CHECKOUT_TOKEN }}
+
+      - name: test - scenario
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        env:
+          TEST_RUNTIME: NATIVE
+          SPRING_PROFILES_ACTIVE: local-native,test,test-ci
+        run: ./gradlew :test --tests com.postvisioning.belthead.worker.scenario.runner.AllScenario
+
+      - name: Create project bundle for test failure report
+        if: failure()
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          task build:bundle
+
+      - name: Encrypt project bundle
+        if: failure()
+        id: build-bundle
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          public_key_path=.tmp.public_key.txt
+          bundle_path=$(task build:bundle:path)
+          encyrpted_file_path=${bundle_path}.tar.gz.encyrped
+          
+          echo -n "${{ secrets.BELTHEAD_GPG_PUBLIC_KEY }}" > $public_key_path
+          tar -zcf - $bundle_path | gpg --encrypt -f $public_key_path -o $encyrpted_file_path
+          
+          output_path=$(echo -n "${{ env.PROJECT_DIR }}/${encyrpted_file_path}" | sed -e "s/^\.\///g" | sed -e "s/\/.\//\//g") 
+          
+          rm -f $public_key_path
+          echo "path=$output_path" >> $GITHUB_OUTPUT
+      - name: Upload project bundle
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.application }}-${{ inputs.arch_type }}-${{ inputs.spring_profiles_active }}
+          retention-days: 1 # Maximum days
+          path: |
+            ${{ steps.build-bundle.outputs.path }}

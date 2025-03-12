@@ -1,0 +1,53 @@
+name: Verification - x64, ubuntu22
+on:
+  repository_dispatch:
+    types: [ verification-x64-ubuntu22 ]
+  workflow_call:
+    inputs:
+      project_ref:
+        type: string
+        default: dev
+  workflow_dispatch:
+    inputs:
+      project_ref:
+        type: string
+        default: dev
+
+permissions:
+  actions: write
+
+jobs:
+  build-native-local:
+    uses: ./.github/workflows/build-native.yml
+    secrets: inherit
+    with:
+      spring_profiles_active: 'local-native'
+      project_ref: ${{ inputs.project_ref }}
+      arch_type: x86
+      arch_runner_label: ubuntu-22.04
+
+  test-native-local:
+    needs: [build-native-local]
+    uses: ./.github/workflows/test-native.yml
+    secrets: inherit
+    with:
+      spring_profiles_active: 'local-native'
+      project_ref: ${{ inputs.project_ref }}
+      arch_type: x86
+      arch_runner_label: ubuntu-22.04
+
+  build-native-prod:
+    needs: [test-native-local]
+    uses: ./.github/workflows/build-native.yml
+    secrets: inherit
+    with:
+      spring_profiles_active: 'prod'
+      project_ref: ${{ inputs.project_ref }}
+      arch_type: x86
+      arch_runner_label: ubuntu-22.04
+
+  cleaning-after-workflow:
+    needs: [build-native-local, test-native-local, build-native-prod]
+    if: always()
+    uses: ./.github/workflows/clean.yml
+    secrets: inherit

@@ -2,37 +2,62 @@ name: Build - native
 on:
   workflow_dispatch:
     inputs:
+      project_ref:
+        type: string
+        default: dev
       spring_profiles_active:
         type: string
         default: local-native
-      deployment_package_artifact_name:
+      arch_type:
         type: string
-        default: deployment-package-native
+        default: x64
+      arch_runner_label:
+        type: string
+        default: ubuntu-22.04
   workflow_call:
     inputs:
+      project_ref:
+        type: string
+        default: dev
       spring_profiles_active:
         type: string
         default: local-native
-      deployment_package_artifact_name:
+      arch_type:
         type: string
-        default: deployment-package-native
+        default: x64
+      arch_runner_label:
+        type: string
+        default: ubuntu-22.04
 
 env:
   SHELL: bash
-  PROJECT_DIR: project
+  PROJECT_DIR: com.belthead.worker
+  RUN_SCOPE_CACHE_PREFIX: run-id--${{ github.run_id }}-
 
 jobs:
-  build:
-    runs-on: ubuntu-22.04
+  build-binary:
+    strategy:
+      matrix:
+        application:
+          - cli
+          - daemon
+    runs-on: ${{ inputs.arch_runner_label }}
     steps:
       ## CHECKOUT ##
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/checkout-project
+      - uses: actions/checkout@v4
+        with:
+          repository: 'PostVisioning/com.belthead.worker'
+          ref: ${{ inputs.project_ref }}
+          path: ${{ env.PROJECT_DIR }}
+          token: ${{ secrets.BELTHEAD_REPO_CHECKOUT_TOKEN }}
+      - uses: ./com.belthead.worker/.github/actions/checkout-subproject
         with:
           checkout_token: ${{ secrets.BELTHEAD_REPO_CHECKOUT_TOKEN }}
+          working-directory: ${{ env.PROJECT_DIR }}
 
       ## TOOL ##
-      - uses: ./.github/actions/setup-tool
+      - uses: ./com.belthead.worker/.github/actions/setup-tool
         with:
           jdk_distribution: 'graalvm'
 
@@ -42,24 +67,70 @@ jobs:
         shell: bash
         run: task install
 
-      ## BUILD and PACKAGE - application##
+      ## BUILD Binary
       - name: Task - build:package:native
-        id: build-package
+        id: build-binary
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         env:
           SPRING_PROFILES_ACTIVE: ${{ inputs.spring_profiles_active }}
         run: |
-          task build:package:native
-          echo "cli_native=$(task build:package:native:daemon:path)" >> $GITHUB_OUTPUT
-          echo "daemon_native=$(task build:package:native:daemon:path)" >> $GITHUB_OUTPUT
+          task build:version
+          task build:nativeCompile:${{ matrix.application }}
+          echo "native=$(task build:nativeCompile:${{ matrix.application }}:path)" >> $GITHUB_OUTPUT
+
+      - name: Save cache binary
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.PROJECT_DIR }}/${{ steps.build-binary.outputs.native }}
+          key: ${{ env.RUN_SCOPE_CACHE_PREFIX }}-binary-${{ matrix.application }}-${{ inputs.arch_type }}-${{ inputs.spring_profiles_active }}
+
+  package-deb:
+    if: false
+    runs-on: ${{ inputs.arch_runner_label }}
+    needs: [build-binary]
+    steps:
+      ## CHECKOUT ##
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: 'PostVisioning/com.belthead.worker'
+          path: com.belthead.worker
+          token: ${{ secrets.BELTHEAD_REPO_CHECKOUT_TOKEN }}
+      - uses: ./com.belthead.worker/.github/actions/checkout-subproject
+        with:
+          checkout_token: ${{ secrets.BELTHEAD_REPO_CHECKOUT_TOKEN }}
+          working-directory: com.belthead.worker
+
+      - name: Import binary - cli
+        uses: actions/download-artifact@master
+        with:
+          name: binary-cli-${{ inputs.arch_type }}-${{ inputs.spring_profiles_active }}
+
+      - name: Import binary - daemon
+        uses: actions/download-artifact@master
+        with:
+          name: binary-daemon-${{ inputs.arch_type }}-${{ inputs.spring_profiles_active }}
+
+      ## TOOL ##
+      - uses: ./com.belthead.worker/.github/actions/setup-tool
+        with:
+          jdk_distribution: 'graalvm'
+
+      - name: Build debian package
+        id: debian-package
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          task build:package:deb
+          echo "native=$(task package:deb:path)" >> $GITHUB_OUTPUT
 
       ## POST - package ##
-      - name: Upload deployment-package
+      - name: Upload debian-package
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.deployment_package_artifact_name }}
+          name: debian-package-${{ inputs.spring_profiles_active }}
+          if-no-files-found: error
           retention-days: 1 # Maximum days
           path: |
-            ${{ env.PROJECT_DIR }}/${{ steps.build-package.outputs.cli_native }}
-            ${{ env.PROJECT_DIR }}/${{ steps.build-package.outputs.daemon_native }}
+            ${{ env.PROJECT_DIR }}/${{ steps.debian-package.outputs.native }}

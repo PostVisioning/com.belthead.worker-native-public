@@ -1,0 +1,20 @@
+name: Clean after workflow
+on:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  SHELL: bash
+  RUN_SCOPE_CACHE_PREFIX: run-id--${{ github.run_id }}-
+
+jobs:
+  clean-cache:
+    runs-on: ubuntu-22.04
+    steps:
+      ## CHECKOUT ##
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/cache-manager
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache-prefix: ${{ env.RUN_SCOPE_CACHE_PREFIX }}

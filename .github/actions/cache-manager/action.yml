@@ -1,0 +1,35 @@
+name: Cache managing
+
+inputs:
+  github-token:
+    type: string
+    required: true
+  cache-prefix:
+    type: string
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Clean workflow scope caches
+      shell: bash
+      env:
+        GH_PAGER: ''
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        gh cache list \
+          --key ${{ inputs.cache-prefix }} \
+          --json key,sizeInBytes | \
+        jq -c '.[]' > caches.txt 
+        
+        cat caches.txt | jq
+
+        ## Prevent top stop exeucution of next delete command
+        set -e
+        
+        while IFS= read -r line; do
+          echo "$line" | jq .
+          echo "$line" | jq -r .key | xargs -I{} gh cache delete "{}"
+        done < caches.txt
+        
+        rm -f caches.txt

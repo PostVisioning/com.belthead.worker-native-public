@@ -1,38 +1,46 @@
 name: Verification - native
 on:
+  repository_dispatch:
+    types: [ verification--com-beltehad-worker ]
   workflow_call:
     inputs:
-      local_deployment_package_artifact_name:
+      project_ref:
         type: string
-      prod_deployment_package_artifact_name:
-        type: string
-      local_project_bundle_artifact_name:
-        type: string
-      prod_project_bundle_artifact_name:
-        type: string
+        default: dev
   workflow_dispatch:
     inputs:
-      local_deployment_package_artifact_name:
+      project_ref:
         type: string
-      prod_deployment_package_artifact_name:
-        type: string
-      local_project_bundle_artifact_name:
-        type: string
-      prod_project_bundle_artifact_name:
-        type: string
-jobs:
-  build-native-local:
-    uses: ./.github/workflows/build-native.yml
-    secrets: inherit
-    with:
-      spring_profiles_active: 'local-native'
-      deployment_package_artifact_name: ${{ inputs.local_deployment_package_artifact_name != ''&& inputs.local_deployment_package_artifact_name || 'local-deployment-package-native' }}
-      project_bundle_artifact_name: ${{ inputs.local_project_bundle_artifact_name != ''&& inputs.local_project_bundle_artifact_name || 'local-project-bundle-native' }}
+        default: dev
 
-  build-native-prod:
-    uses: ./.github/workflows/build-native.yml
-    secrets: inherit
-    with:
-      spring_profiles_active: 'prod'
-      deployment_package_artifact_name: ${{ inputs.prod_deployment_package_artifact_name != ''&& inputs.prod_deployment_package_artifact_name || 'prod-deployment-package-native' }}
-      project_bundle_artifact_name: ${{ inputs.prod_project_bundle_artifact_name != ''&& inputs.prod_project_bundle_artifact_name || 'prod-project-bundle-native' }}
+permissions:
+  actions: write
+
+jobs:
+  triggerVerification:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const result = await github.rest.actions.createWorkflowDispatch({
+              owner: '${{ github.repository_owner }}',
+              repo: '${{ github.event.repository.name }}',
+              workflow_id: 'verification-arm64-ubuntu22.yml',
+              ref: '${{ github.ref }}',
+              inputs: {"project_ref": "${{ inputs.project_ref }}"}
+            })
+            console.log(result);
+      - uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const result = await github.rest.actions.createWorkflowDispatch({
+              owner: '${{ github.repository_owner }}',
+              repo: '${{ github.event.repository.name }}',
+              workflow_id: 'verification-x64-ubuntu22.yml',
+              ref: '${{ github.ref }}',
+              inputs: {"project_ref": "${{ inputs.project_ref }}"}
+            })
+            console.log(result);
