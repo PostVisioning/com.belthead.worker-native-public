@@ -1,0 +1,65 @@
+name: Build - native
+on:
+  workflow_dispatch:
+    inputs:
+      spring_profiles_active:
+        type: string
+        default: local-native
+      deployment_package_artifact_name:
+        type: string
+        default: deployment-package-native
+  workflow_call:
+    inputs:
+      spring_profiles_active:
+        type: string
+        default: local-native
+      deployment_package_artifact_name:
+        type: string
+        default: deployment-package-native
+
+env:
+  SHELL: bash
+  PROJECT_DIR: project
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      ## CHECKOUT ##
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/checkout-project
+        with:
+          checkout_token: ${{ secrets.BELTHEAD_REPO_CHECKOUT_TOKEN }}
+
+      ## TOOL ##
+      - uses: ./.github/actions/setup-tool
+        with:
+          jdk_distribution: 'graalvm'
+
+      ## BUILD - library ##
+      - name: Task - install
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: task install
+
+      ## BUILD and PACKAGE - application##
+      - name: Task - build:package:native
+        id: build-package
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        env:
+          SPRING_PROFILES_ACTIVE: ${{ inputs.spring_profiles_active }}
+        run: |
+          task build:package:native
+          echo "cli_native=$(task build:package:native:daemon:path)" >> $GITHUB_OUTPUT
+          echo "daemon_native=$(task build:package:native:daemon:path)" >> $GITHUB_OUTPUT
+
+      ## POST - package ##
+      - name: Upload deployment-package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.deployment_package_artifact_name }}
+          retention-days: 1 # Maximum days
+          path: |
+            ${{ env.PROJECT_DIR }}/${{ steps.build-package.outputs.cli_native }}
+            ${{ env.PROJECT_DIR }}/${{ steps.build-package.outputs.daemon_native }}
