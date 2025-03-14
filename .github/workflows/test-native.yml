@@ -87,10 +87,18 @@ jobs:
           chmod +x ${{ steps.binary-path.outputs.daemon_path }}
           ls -lh ${{ steps.binary-path.outputs.daemon_path }}
 
-      ## Service containers - belthead-api
-      - uses: ./com.belthead.worker/.github/actions/up-belthead.api-server
+      - uses: actions/checkout@v4
+        id: checkout-com-belthead-api
+        with:
+          repository: 'PostVisioning/com.belthead.api'
+          path: subproject/belthead.api
+          token: ${{ secrets.BELTHEAD_REPO_CHECKOUT_TOKEN }}
+
+      - name: Run composite action of [up-as-dependent-service]
+        uses: ./subproject/belthead.api/.github/actions/up-as-dependent-service
         with:
           checkout_token: ${{ secrets.BELTHEAD_REPO_CHECKOUT_TOKEN }}
+          working-directory: subproject/belthead.api
 
       - name: test - scenario
         working-directory: ${{ env.PROJECT_DIR }}
