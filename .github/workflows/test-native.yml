@@ -99,6 +99,7 @@ jobs:
         with:
           checkout_token: ${{ secrets.BELTHEAD_REPO_CHECKOUT_TOKEN }}
           working-directory: subproject/belthead.api
+          project_ref: ${{ steps.checkout-com-belthead-api.outputs.commit }}
 
       - name: test - scenario
         working-directory: ${{ env.PROJECT_DIR }}
